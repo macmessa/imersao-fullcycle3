@@ -4,51 +4,63 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
-	"github.com/macmessa/imersao-fullcycle3/codebank/domain"
+	"github.com/macmessa/imersao-fullcycle3/codebank/infrastructure/grpc/server"
+	"github.com/macmessa/imersao-fullcycle3/codebank/infrastructure/message_broker"
 	"github.com/macmessa/imersao-fullcycle3/codebank/infrastructure/repository"
 	"github.com/macmessa/imersao-fullcycle3/codebank/usecase"
 )
 
-func main() {
-	db := setupDb()
-	defer db.Close()
+func init() {
+	err := godotenv.Load()
 
-	cc := domain.NewCreditCard()
-	cc.Number = "1234"
-	cc.Name = "Marco"
-	cc.ExpirationYear = 2021
-	cc.ExpirationMonth = 7
-	cc.CVV = 321
-	cc.Limit = 20000
-	cc.Balance = 0
-
-	repo := repository.NewTransactionRepositoryDb(db)
-	err := repo.CreateCreditCard(*cc)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal("error loading .env file")
 	}
 }
 
-func setupTransactionUseCase(db *sql.DB) usecase.UseCaseTransaction {
+func main() {
+	db := setupDb()
+	defer db.Close()
+	producer := setupMessageProducer()
+	processTransactionUseCase := setupTransactionUseCase(db, producer)
+	serveGrpc(processTransactionUseCase)
+}
+
+func setupTransactionUseCase(db *sql.DB, producer message_broker.MessageProducer) usecase.UseCaseTransaction {
 	transactionRepository := repository.NewTransactionRepositoryDb(db)
 	useCase := usecase.NewUseCaseTransaction(transactionRepository)
+	useCase.MessageProducer = producer
 	return useCase
+}
+
+func setupMessageProducer() message_broker.MessageProducer {
+	producer := message_broker.NewMessageProducer()
+	producer.SetupProducer(os.Getenv("KafkaBoostrapServers"))
+	return producer
 }
 
 func setupDb() *sql.DB {
 	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		"host.docker.internal",
-		"5432",
-		"postgres",
-		"root",
-		"codebank",
+		os.Getenv("host"),
+		os.Getenv("port"),
+		os.Getenv("user"),
+		os.Getenv("password"),
+		os.Getenv("dbname"),
 	)
 	db, err := sql.Open("postgres", psqlInfo)
-	println(err)
 	if err != nil {
 		log.Fatal("error connection to database")
 	}
 	return db
+}
+
+func serveGrpc(processTransactionUseCase usecase.UseCaseTransaction) {
+	grpcServer := server.NewGRPCServer()
+	grpcServer.ProcessTransactionUseCase = processTransactionUseCase
+	fmt.Println("Starting gRPC Server")
+	grpcServer.Serve()
 }

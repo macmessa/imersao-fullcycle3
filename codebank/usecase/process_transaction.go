@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/macmessa/imersao-fullcycle3/codebank/domain"
@@ -45,7 +46,7 @@ func (u UseCaseTransaction) ProcessTransaction(transactionDto dto.Transaction) (
 		return domain.Transaction{}, err
 	}
 
-	err = u.MessageProducer.Publish(string(transactionJson), "payments")
+	err = u.MessageProducer.Publish(string(transactionJson), os.Getenv("KafkaTransactionsTopic"))
 
 	if err != nil {
 		return domain.Transaction{}, err
